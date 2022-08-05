@@ -1,7 +1,85 @@
 #!/bin/bash
 
-SCRIPT=$(realpath "${BASH_SOURCE}")
+SCRIPT=$(realpath "${0}")
 SCRIPTDIR=$(dirname "${SCRIPT}")
+
+error() {
+  echo "$1"
+  exit 1
+}
+
+gen_wifi_auth() {
+  local ssid=$1
+  local key=$2
+  if [[ -z ${ssid} ]] ; then
+    read -p "W-Fi SSID: " -r ssid
+  fi
+  if [[ -z ${key} ]] ; then
+    read -p "W-Fi Password: " -r key
+  fi
+
+  if [[ -z ${ssid} || -z ${key} ]] ; then
+    exit 1
+  fi
+
+  local psk=$(wpa_passphrase "${ssid}" "${key}" | grep -e "\spsk" | cut -d= -f2)
+  echo -e "[Security]\nPreSharedKey=${psk}" | tee "${3:-/var/lib/iwd/${ssid}.psk}"
+
+  echo ${ssid}
+}
+
+init_partition() {
+  dev=$1
+  if [[ -z "${dev}" ]] ; then
+    error "Invalid block device: ${dev}"
+  fi
+
+  if [[ ! -b ${dev} ]] ; then
+    error "Invalid block device: ${dev}"
+  fi
+
+  fdisk -l ${dev}
+
+  read -p "Are you sure you want to wipe ${dev}? " -n 1 -r
+  echo    # (optional) move to a new line
+  if [[ ! $REPLY =~ ^[Yy]$ ]] ; then
+    exit
+  fi
+
+  # Fdisk
+  (
+  echo g      # Create a new empty GPT partition table
+  echo n      # Add a new partition
+  echo        # Auto-select partition number
+  echo        # Auto-select partition start
+  echo +512M  # Partition Size
+  echo t      # Change type
+  echo 1      # EFI parttion
+  echo        # Auto-select partition
+  echo n      # Add a new partition
+  echo        # Auto-select partition number
+  echo        # Auto-select partition start
+  echo +50G   # Partition size
+  echo n      # Add a new partition
+  echo        # Auto-select partition number
+  echo        # Auto-select partition start
+  echo        # Auto-select partition end
+
+  echo w      # Write changes
+  ) | fdisk -W always ${dev}
+
+  partEfi=${dev}1
+  partRoot=${dev}2
+  partHome=${dev}3
+
+  mkfs.fat -F32 ${partEfi}
+  mkfs.ext4 ${partRoot}
+  mkfs.ext4 ${partHome}
+}
+
+list_device() {
+  lsblk -I 8 -l -n -a | awk '/disk/ {print $1}'
+}
 
 main() {
   echo ${SCRIPT}
