@@ -1,0 +1,10 @@
+#!/bin/bash
+
+SCRIPT=$(realpath "${BASH_SOURCE}")
+SCRIPTDIR=$(dirname "${SCRIPT}")
+
+main() {
+  echo ${SCRIPT}
+}
+
+main "$@"
