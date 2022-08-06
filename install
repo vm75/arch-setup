@@ -5,13 +5,10 @@ SCRIPTDIR=$(dirname "${SCRIPT}")
 
 SCRIPTURL=https://raw.githubusercontent.com/vm75/arch-setup/main/install
 
-read -r -d '' PACKAGES << EOF
-git vim systemd-swap p7zip zip unzip screen bash-completion zsh htop base-devel man pacman-contrib python-pip wget lsof jq time cronie cpulimit lm_sensors
-networkmanager openresolv inetutils
-pulseaudio alsa-utils alsa-firmware alsa-lib alsa-oss
-dos2unix dosfstools rsync ntfs3 nfs-utils
-libva-utils libva-intel-driver intel-media-sdk
-EOF
+CORE_PACKAGES="git vim systemd-swap p7zip zip unzip screen bash-completion zsh htop base-devel man pacman-contrib python-pip wget lsof time cronie cpulimit lm_sensors"
+NET_PACKAGES="networkmanager openresolv inetutils"
+MEDIA_PACKAGES="pulseaudio alsa-utils alsa-firmware alsa-lib alsa-oss libva-utils libva-intel-driver intel-media-sdk"
+FS_PACKAGES="dos2unix dosfstools rsync ntfs3 nfs-utils"
 
 error() {
   local msg=${1}
@@ -299,7 +296,7 @@ bootstrap() {
     wltools=iwd
   fi
 
-  packages="base linux${lts} linux${lts}-headers linux-firmware reflector vim git sudo grub efibootmgr openssh archlinux-keyring ${wltools} ${PACKAGES}"
+  packages="base linux${lts} linux${lts}-headers linux-firmware reflector vim git sudo grub efibootmgr openssh archlinux-keyring ${wltools} ${CORE_PACKAGES} ${NET_PACKAGES} ${MEDIA_PACKAGES} ${FS_PACKAGES}"
   pacstrap /mnt $packages
 
   genfstab -U /mnt >> /mnt/etc/fstab
