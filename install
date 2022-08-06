@@ -1,0 +1,331 @@
+#!/bin/bash
+
+SCRIPT=$(realpath "${0}")
+SCRIPTDIR=$(dirname "${SCRIPT}")
+
+SCRIPTURL=https://raw.githubusercontent.com/vm75/arch-setup/main/install
+
+read -r -d '' PACKAGES << EOF
+git vim systemd-swap p7zip zip unzip screen bash-completion zsh htop base-devel man pacman-contrib python-pip wget lsof jq time cronie cpulimit lm_sensors
+networkmanager openresolv inetutils
+pulseaudio alsa-utils alsa-firmware alsa-lib alsa-oss
+dos2unix dosfstools rsync ntfs3 nfs-utils
+libva-utils libva-intel-driver intel-media-sdk
+EOF
+
+error() {
+  local msg=${1}
+  echo -e "\e[31m${SCRIPTNAME}: $1\e[0m"
+  exit -1
+}
+
+checkError() {
+  if [[ $? -ne 0 ]] ; then
+    error "Error while $1"
+  fi
+}
+
+init_wifi() {
+  wlint=$(ip a | grep " wl" | grep CAST | sed 's/.* \(wl\w\+\):.*/\1/')
+  if [[ $wlint != "" ]] ; then
+    ssid=$(gen_wifi_auth ${ssid} "${key}")
+    if [[ ! -z $ssid ]] ; then
+      iwctl station wlan0 connect ${ssid}
+      if [[ $? -ne 0 ]] ; then
+        return
+      fi
+
+      echo "Waiting 10 secs..."
+      sleep 10
+    fi
+  fi
+}
+
+setup_datetime() {
+  hwclock --systohc
+  timedatectl set-ntp true
+  systemctl enable systemd-timesyncd.service
+  checkError "enabling systemd-timesyncd"
+
+  if [[ ! -z ${in_target} ]] ; then
+    read -p "Timezone (def: America/Los_Angeles)  : "
+    timezone=${REPLY:-America/Los_Angeles}
+
+    timedatectl set-timezone ${timezone}
+    checkError "setting timezone"
+    ln -s /usr/share/zoneinfo/${timezone} /etc/localtime
+  fi
+}
+
+setup_locale() {
+  export LANG=en_US.UTF-8
+  echo LANG=$LANG > /etc/locale.conf
+  sed -e "s/^#${LANG}/${LANG}/" -i /etc/locale.gen
+  locale-gen
+}
+
+setup_hostname() {
+  read -p "Fully qualified hostname (def: home) : "
+  hostname=${REPLY:-home}
+
+  echo ${hostname} > /etc/hostname
+  echo "127.0.0.1 localhost" > /etc/hosts
+  echo "::1 localhost" >> /etc/hosts
+  if [[ -z "${DOMAINAME}" ]] ; then
+    echo "127.0.1.1 ${hostname}" >> /etc/hosts
+  else
+    echo "127.0.1.1 ${hostname}.${DOMAINNAME} ${hostname}" >> /etc/hosts
+  fi
+}
+
+setup_user() {
+  groupadd -r docker
+  groupadd -g 1000 ${username}
+  chown -R ${username}:${username} /home/${username}
+  useradd -u 1000 -g ${username} -G wheel,audio,docker -p '$1$zgZnwmA8$8mUbHqopS4NfHArKPMb4w1' -s /bin/bash ${username}
+}
+
+init_os() {
+  pacman -Syy --noconfirm
+  pacman -Sy --noconfirm reflector
+  checkError "initializing pacman"
+
+  read -p "Country code for reflector (def: US) : "
+  country=${REPLY:-US}
+  echo "Setting up reflectors..."
+  reflector -c "${country}" -f 12 -l 10 -n 12 --save /etc/pacman.d/mirrorlist
+  checkError "setting reflectors"
+
+  # set date-time
+  setup_datetime
+
+  read -p "Use lts? " -n 1 -r ; echo
+  if [[ ${REPLY} =~ ^[Yy]$ ]] ; then
+    lts="-lts"
+  fi
+}
+
+select_disk() {
+  echo "The following block devices are available:"
+  local disks=($(lsblk -I 8 -l -n -a | awk '/disk/ {print $1}'))
+  local count=${#disks[@]}
+  for (( i=0; i<${count}; i++ )); do echo "${i}: ${disks[${i}]}" ; done
+  read -p "Select disk # to install (>= 0 AND < ${count}): " -n 1 -r target ; echo
+  if [[ $(expr 0 '<=' ${target} '&' ${target} '<' ${count}) -eq 0 ]] ; then
+    error "Invalid target device selected"
+  fi
+  target="/dev/${disks[${target}]}"
+
+  if [[ -z "${target}" ]] ; then
+    error "Invalid block device: ${target}"
+  fi
+
+  if [[ ! -b ${target} ]] ; then
+    error "Invalid block device: ${target}"
+  fi
+}
+
+partition_target() {
+  dev=$1
+
+  fdisk -l ${dev}
+
+  read -p "Are you sure you want to wipe ${dev}? " -n 1 -r ; echo
+  if [[ ! ${REPLY} =~ ^[Yy]$ ]] ; then
+    exit
+  fi
+
+  # Fdisk
+  (
+  echo g      # Create a new empty GPT partition table
+  echo n      # Add a new partition
+  echo        # Auto-select partition number
+  echo        # Auto-select partition start
+  echo +512M  # Partition Size
+  echo t      # Change type
+  echo 1      # EFI parttion
+  echo        # Auto-select partition
+  echo n      # Add a new partition
+  echo        # Auto-select partition number
+  echo        # Auto-select partition start
+  echo        # Auto-select partition end
+
+  echo w      # Write changes
+  ) | fdisk -W always ${dev}
+}
+
+gen_wifi_auth() {
+  local ssid=$1
+  local key=$2
+  if [[ -z ${ssid} ]] ; then
+    read -p "W-Fi SSID: " -r ssid
+  fi
+  if [[ -z ${key} ]] ; then
+    read -p "W-Fi Password: " -r key
+  fi
+
+  if [[ -z ${ssid} || -z ${key} ]] ; then
+    error "No valid ssid/key pair"
+  fi
+
+  local psk=$(wpa_passphrase "${ssid}" "${key}" | grep -e "\spsk" | cut -d= -f2)
+  echo -e "[Security]\nPreSharedKey=${psk}" | tee "${3:-/var/lib/iwd/${ssid}.psk}"
+
+  echo ${ssid}
+}
+
+setup_swap() {
+  systemctl enable systemd-swap
+}
+
+setup_auth() {
+  read -p "Set root password? " -n 1 -r ; echo
+  if [[ ${REPLY} =~ ^[Yy]$ ]] ; then
+    passwd
+  fi
+  read -p "Set password for '${username}'? " -n 1 -r ; echo
+  if [[ ${REPLY} =~ ^[Yy]$ ]] ; then
+    passwd ${username}
+  fi
+
+  # sudo
+  mkdir -p /etc/sudoers.d
+  echo "${username} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${username}
+}
+
+setup_network() {
+  echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/30-ipforward.conf
+  echo -e "[Match]\nName=en*\n[Network]\nDHCP=yes" > /etc/systemd/network/20-wired.network
+  chmod 755 /etc/systemd/network/20-wired.network
+
+  systemctl enable systemd-networkd.service
+  systemctl enable systemd-resolved.service
+
+  # enable network configuration
+  systemctl enable iwd
+  mkdir -p /etc/iwd
+  echo -e "[General]\nEnableNetworkConfiguration=true" > /etc/iwd/main.conf
+
+  # nfs
+  systemctl enable rpcbind
+  iptables -A INPUT -p tcp -m tcp --dport 111 -j ACCEPT
+  iptables -A INPUT -p tcp -m tcp --dport 2049 -j ACCEPT
+  iptables -A INPUT -p tcp -m tcp --dport 20048 -j ACCEPT
+  iptables -A INPUT -p udp -m udp --dport 111 -j ACCEPT
+  iptables -A INPUT -p udp -m udp --dport 2049 -j ACCEPT
+  iptables -A INPUT -p udp -m udp --dport 20048 -j ACCEPT
+  iptables -A INPUT -p tcp -m tcp --dport 32765 -j ACCEPT
+  iptables -A INPUT -p tcp -m tcp --dport 32803 -j ACCEPT
+  iptables -A INPUT -p udp -m udp --dport 32765 -j ACCEPT
+  iptables -A INPUT -p udp -m udp --dport 32803 -j ACCEPT
+  iptables-save > /etc/iptables/iptables.rules
+  mkdir -p /exports
+}
+
+setup_audio() {
+  if [[ -f /boot/config.txt ]] ; then # For Pi
+    echo "dtparam=audio=on" >> /boot/config.txt
+  else                                # For Nuc
+    echo "install snd_hda_intel /bin/false" >> /etc/modprobe.d/modprobe.conf
+  fi
+  echo "options snd-usb-audio index=0" >> /etc/modprobe.d/alsa-base.conf
+  su - ${username} -c "systemctl --user start pulseaudio"
+}
+
+setup_apps() {
+  # cron
+  systemctl enable cronie
+
+  # vi
+  rm /usr/bin/vi
+  ln -s /usr/bin/vim /usr/bin/vi
+
+  # sshd
+  systemctl enable sshd.service
+
+  # key for aur
+  gpg --keyserver keyserver.ubuntu.com --recv-keys 5C4A26CD4CC8C397
+}
+
+setup_boot() {
+  grub-install --target=x86_64-efi --bootloader-id=GRUB --efi-directory=/boot/efi
+  grub-mkconfig -o /boot/grub/grub.cfg
+}
+
+setup_target() {
+  export in_target=1
+  export username=$1
+
+  setup_datetime
+  setup_locale
+  setup_hostname
+  setup_user
+  setup_auth
+  setup_swap
+  setup_network
+  setup_audio
+  setup_apps
+  setup_boot
+}
+
+bootstrap() {
+  init_wifi
+  init_os
+  select_disk
+  partition_target ${target}
+  partHome=$1
+
+  partEfi=${target}1
+  partRoot=${target}2
+
+  # format partitions
+  mkfs.fat -F32 ${partEfi}
+  mkfs.ext4 ${partRoot}
+
+  # mount partitions
+  mkdir /mnt
+  mount ${partRoot} /mnt
+  mkdir -p /mnt/boot/efi
+  mount ${partEfi} /mnt/boot/efi
+
+  if [[ ! -z "${partHome}" && -b ${partHome} ]] ; then
+    mkdir -p /mnt/home
+    mount ${partHome} /mnt/home
+  fi
+
+  if [[ $(ls /var/lib/iwd/*.psk) ]] ; then
+    mkdir -p /mnt/var/lib/iwd
+    cp /var/lib/iwd/*.psk /mnt/var/lib/iwd/*.psk
+    wltools=iwd
+  fi
+
+  packages="base linux${lts} linux${lts}-headers linux-firmware reflector vim git sudo grub efibootmgr openssh archlinux-keyring ${wltools} ${PACKAGES}"
+  pacstrap /mnt $packages
+
+  genfstab -U /mnt >> /mnt/etc/fstab
+
+  read -p "Admin username (def: admin)          : "
+  username=${REPLY:-admin}
+
+  if [[ ! -d /mnt/home/${username} ]] ; then
+    cp -r /mnt/etc/skel /mnt/home/${username}
+  fi
+
+  mkdir -p /mnt/tmp
+  curl ${SCRIPTURL} -o /mnt/tmp/arch-install
+
+  arch-chroot /mnt /tmp/arch-install setup-target ${username}
+
+  umount ${partHome} ${partEfi} ${partRoot}
+}
+
+main() {
+  if [[ "$1" == "setup-target" ]] ; then
+    shift
+    setup_target "$@"
+  else
+    bootstrap "$@"
+  fi
+}
+
+main "$@"
