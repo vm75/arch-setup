@@ -8,7 +8,7 @@ SCRIPTURL=https://raw.githubusercontent.com/vm75/arch-setup/main/install
 CORE_PACKAGES="git vim systemd-swap p7zip zip unzip screen bash-completion zsh htop base-devel man pacman-contrib python-pip wget lsof time cronie cpulimit lm_sensors"
 NET_PACKAGES="networkmanager openresolv inetutils"
 MEDIA_PACKAGES="pulseaudio alsa-utils alsa-firmware alsa-lib alsa-oss libva-utils libva-intel-driver intel-media-sdk"
-FS_PACKAGES="dos2unix dosfstools rsync ntfs3 nfs-utils"
+FS_PACKAGES="dos2unix dosfstools rsync nfs-utils"
 
 error() {
   local msg=${1}
@@ -95,11 +95,6 @@ init_os() {
 
   # set date-time
   setup_datetime
-
-  read -p "Use lts? " -n 1 -r ; echo
-  if [[ ${REPLY} =~ ^[Yy]$ ]] ; then
-    lts="-lts"
-  fi
 }
 
 select_disk() {
@@ -280,7 +275,7 @@ bootstrap() {
   mkfs.ext4 ${partRoot}
 
   # mount partitions
-  mkdir /mnt
+  mkdir -p /mnt
   mount ${partRoot} /mnt
   mkdir -p /mnt/boot/efi
   mount ${partEfi} /mnt/boot/efi
@@ -296,6 +291,10 @@ bootstrap() {
     wltools=iwd
   fi
 
+  read -p "Use lts? " -n 1 -r ; echo
+  if [[ ${REPLY} =~ ^[Yy]$ ]] ; then
+    lts="-lts"
+  fi
   packages="base linux${lts} linux${lts}-headers linux-firmware reflector vim git sudo grub efibootmgr openssh archlinux-keyring ${wltools} ${CORE_PACKAGES} ${NET_PACKAGES} ${MEDIA_PACKAGES} ${FS_PACKAGES}"
   pacstrap /mnt $packages
 
