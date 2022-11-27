@@ -95,13 +95,15 @@ setup_drive() {
     (
     echo o      # Create a new empty GPT partition table
     echo n      # Add a new partition
+    echo        # Auto-select partition type
     echo        # Auto-select partition number
     echo        # Auto-select partition start
     echo +256M  # Partition Size
     echo t      # Change type
-    echo c      # EFI parttion
+    echo c      # VFAT parttion
     echo        # Auto-select partition
     echo n      # Add a new partition
+    echo        # Auto-select partition type
     echo        # Auto-select partition number
     echo        # Auto-select partition start
     echo        # Auto-select partition end
