@@ -115,8 +115,15 @@ setup_drive() {
 
   checkError "partitioning ${dev}"
 
-  export partBoot=${DEVICE}1
-  export partRoot=${DEVICE}2
+  if [[ -e ${DEVICE}1 && -e ${DEVICE}2 ]] ; then
+    export partBoot=${DEVICE}1
+    export partRoot=${DEVICE}2
+  elif [[ -e ${DEVICE}p1 && -e ${DEVICE}p2 ]] ; then
+    export partBoot=${DEVICE}p1
+    export partRoot=${DEVICE}p2
+  else
+    error "Error detecting partitions"
+  fi
 
   # format partitions
   if [[ ${BIOS_BOOTLOADER} != -b ]] ; then
