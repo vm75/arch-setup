@@ -163,9 +163,9 @@ setup_user() {
   # create user
   cp -r /etc/skel /home/${USERNAME}
   groupadd -g 1000 ${USERNAME}
-  chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
   useradd -u 1000 -g ${USERNAME} -G wheel -s /bin/bash ${USERNAME}
   echo "${USERNAME}:${PASSWORD}" | chpasswd
+  chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
 
   # sudo
   mkdir -p /etc/sudoers.d
