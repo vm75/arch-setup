@@ -1,8 +1,6 @@
 #!/bin/bash
 
-SCRIPT=$(realpath "${0}")
-SCRIPTDIR=$(dirname "${SCRIPT}")
-
+SCRIPTNAME=install-unattend
 SCRIPTURL=https://raw.githubusercontent.com/vm75/arch-setup/main/install-unattend
 
 COUNTRIES=US                  # -c
@@ -225,11 +223,10 @@ bootstrap() {
   genfstab -U /mnt >> /mnt/etc/fstab
 
   # setup and run post-pacstrap
-  mkdir -p /mnt/tmp
-  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c ${COUNTRIES} -h ${HOSTNAME} -l ${LOCALE} -p ${PASSWORD} -s ${SSHKEY} -t ${TIMEZONE} -u ${USERNAME}" > /mnt/tmp/post-pacstrap
-  chmod +x /mnt/tmp/post-pacstrap
-  arch-chroot /mnt /tmp/post-pacstrap
-  rm /tmp/post-pacstrap
+  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c ${COUNTRIES} -h ${HOSTNAME} -l ${LOCALE} -p ${PASSWORD} -s ${SSHKEY} -t ${TIMEZONE} -u ${USERNAME}" > /mnt/post-pacstrap
+  chmod +x /mnt/post-pacstrap
+  arch-chroot /mnt /post-pacstrap
+  rm /mnt/post-pacstrap
 
   umount ${partEfi} ${partRoot}
 }
