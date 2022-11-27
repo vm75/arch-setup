@@ -13,7 +13,7 @@ HOSTNAME=server               # -n
 USERNAME=admin                # -u
 PASSWORD=admin                # -p
 SSHKEY=                       # -s
-BIOS_BOOTLOADER               # -b
+BIOS_BOOTLOADER=              # -b
 
 error() {
   local msg=${1}
