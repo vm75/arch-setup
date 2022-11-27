@@ -57,10 +57,12 @@ init_wifi() {
 }
 
 init_os() {
+  # update
   pacman -Syy --noconfirm
   pacman -Sy --noconfirm reflector archlinux-keyring
   checkError "initializing pacman"
 
+  # set mirrors
   echo "Setting up reflectors..."
   reflector -c "${COUNTRIES}" -f 12 -l 10 -n 12 --save /etc/pacman.d/mirrorlist
   checkError "setting reflectors"
@@ -69,7 +71,7 @@ init_os() {
   setup_datetime
 }
 
-partition_target() {
+setup_drive() {
   dev=$1
 
   fdisk -l ${dev}
@@ -91,6 +93,17 @@ partition_target() {
 
   echo w      # Write changes
   ) | fdisk -W always ${dev}
+
+  checkError "partitioning ${dev}"
+
+  export partEfi=${DEVICE}1
+  export partRoot=${DEVICE}2
+
+  # format partitions
+  mkfs.fat -F32 ${partEfi}
+  checkError "formatting ${partEfi}"
+  mkfs.ext4 ${partRoot}
+  checkError "formatting ${partRoot}"
 }
 
 setup_datetime() {
@@ -151,6 +164,7 @@ setup_user() {
 }
 
 setup_network() {
+  echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/30-ipforward.conf
   echo -e "[Match]\nName=en*\n[Network]\nDHCP=yes" > /etc/systemd/network/20-wired.network
   chmod 755 /etc/systemd/network/20-wired.network
 
@@ -179,6 +193,7 @@ setup_apps() {
 }
 
 setup_boot() {
+  # grub setup
   grub-install --target=x86_64-efi --bootloader-id=GRUB --efi-directory=/boot/efi
   grub-mkconfig -o /boot/grub/grub.cfg
 }
@@ -187,14 +202,8 @@ bootstrap() {
   # init_wifi
   init_os
   
-  # partition target device
-  partition_target ${DEVICE}
-  partEfi=${DEVICE}1
-  partRoot=${DEVICE}2
-
-  # format partitions
-  mkfs.fat -F32 ${partEfi}
-  mkfs.ext4 ${partRoot}
+  # partition and format target device
+  setup_drive ${DEVICE}
 
   # mount partitions
   mkdir -p /mnt
@@ -217,7 +226,7 @@ bootstrap() {
 
   # setup and run post-pacstrap
   mkdir -p /mnt/tmp
-  echo "curl -L ${SCRIPTURL} | bash -s -- -c ${COUNTRIES} -h ${HOSTNAME} -l ${LOCALE} -p ${PASSWORD} -s ${SSHKEY} -t ${TIMEZONE} -u ${USERNAME}" > /mnt/tmp/post-pacstrap
+  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c ${COUNTRIES} -h ${HOSTNAME} -l ${LOCALE} -p ${PASSWORD} -s ${SSHKEY} -t ${TIMEZONE} -u ${USERNAME}" > /mnt/tmp/post-pacstrap
   chmod +x /mnt/tmp/post-pacstrap
   arch-chroot /mnt /tmp/post-pacstrap
   rm /tmp/post-pacstrap
