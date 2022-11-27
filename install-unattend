@@ -13,6 +13,7 @@ HOSTNAME=server               # -n
 USERNAME=admin                # -u
 PASSWORD=admin                # -p
 SSHKEY=                       # -s
+BIOS_BOOTLOADER               # -b
 
 error() {
   local msg=${1}
@@ -74,23 +75,43 @@ init_os() {
 setup_drive() {
   dev=$1
 
-  # create partition
-  (
-  echo g      # Create a new empty GPT partition table
-  echo n      # Add a new partition
-  echo        # Auto-select partition number
-  echo        # Auto-select partition start
-  echo +256M  # Partition Size
-  echo t      # Change type
-  echo 1      # EFI parttion
-  echo        # Auto-select partition
-  echo n      # Add a new partition
-  echo        # Auto-select partition number
-  echo        # Auto-select partition start
-  echo        # Auto-select partition end
+  if [[ ${BIOS_BOOTLOADER} == -b ]] ; then
+    # create partition
+    (
+    echo g      # Create a new empty GPT partition table
+    echo n      # Add a new partition
+    echo        # Auto-select partition number
+    echo        # Auto-select partition start
+    echo +1M    # Partition Size
+    echo t      # Change type
+    echo 4      # BIOS boot partition
+    echo        # Auto-select partition
+    echo n      # Add a new partition
+    echo        # Auto-select partition number
+    echo        # Auto-select partition start
+    echo        # Auto-select partition end
 
-  echo w      # Write changes
-  ) | fdisk -W always ${dev}
+    echo w      # Write changes
+    ) | fdisk -W always ${dev}
+  else
+    # create partition
+    (
+    echo g      # Create a new empty GPT partition table
+    echo n      # Add a new partition
+    echo        # Auto-select partition number
+    echo        # Auto-select partition start
+    echo +256M  # Partition Size
+    echo t      # Change type
+    echo 1      # EFI parttion
+    echo        # Auto-select partition
+    echo n      # Add a new partition
+    echo        # Auto-select partition number
+    echo        # Auto-select partition start
+    echo        # Auto-select partition end
+
+    echo w      # Write changes
+    ) | fdisk -W always ${dev}
+  fi
 
   checkError "partitioning ${dev}"
 
@@ -98,8 +119,10 @@ setup_drive() {
   export partRoot=${DEVICE}2
 
   # format partitions
-  mkfs.fat -F32 ${partBoot}
-  checkError "formatting ${partBoot}"
+  if [[ ${BIOS_BOOTLOADER} != -b ]] ; then
+    mkfs.fat -F32 ${partBoot}
+    checkError "formatting ${partBoot}"
+  fi
   mkfs.ext4 ${partRoot}
   checkError "formatting ${partRoot}"
 }
@@ -195,7 +218,11 @@ setup_apps() {
 
 setup_bootloader() {
   # grub setup
-  grub-install --target=x86_64-efi --bootloader-id=GRUB --efi-directory=/boot/efi
+  if [[ ${BIOS_BOOTLOADER} == -b ]] ; then
+    grub-install --target=i386-pc ${DEVICE}
+  else
+    grub-install --target=x86_64-efi --bootloader-id=GRUB --efi-directory=/boot/efi
+  fi
   grub-mkconfig -o /boot/grub/grub.cfg
 }
 
@@ -208,8 +235,10 @@ bootstrap() {
   # mount partitions
   mkdir -p /mnt
   mount ${partRoot} /mnt
-  mkdir -p /mnt/boot/efi
-  mount ${partBoot} /mnt/boot/efi
+  if [[ ${BIOS_BOOTLOADER} != -b ]] ; then
+    mkdir -p /mnt/boot
+    mount ${partBoot} /mnt/boot
+  fi
 
   # install to drive
   packages="base linux${LTS} linux${LTS}-headers linux-firmware reflector vim git systemd-swap htop sudo grub efibootmgr openssh archlinux-keyring base-devel man lm_sensors networkmanager openresolv iwd"
@@ -218,14 +247,15 @@ bootstrap() {
   # copy wi-fi
   if [[ $(ls /var/lib/iwd/*.psk 2> /dev/null) ]] ; then
     mkdir -p /mnt/var/lib/iwd
-    cp /var/lib/iwd/*.psk /mnt/var/lib/iwd/*.psk
+    chmod 700 /mnt/var/lib/iwd
+    cp -a /var/lib/iwd/*.psk /mnt/var/lib/iwd/*.psk
   fi
 
   # generate fstab
   genfstab -U /mnt >> /mnt/etc/fstab
 
   # setup and run post-pacstrap
-  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c ${COUNTRIES} -n ${HOSTNAME} -l ${LOCALE} -k ${KEYMAP} -t ${TIMEZONE} -u ${USERNAME} -p ${PASSWORD} -s '${SSHKEY}'" > /mnt/post-pacstrap
+  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c ${COUNTRIES} ${BIOS_BOOTLOADER} -n ${HOSTNAME} -l ${LOCALE} -k ${KEYMAP} -t ${TIMEZONE} -u ${USERNAME} -p ${PASSWORD} -s '${SSHKEY}'" > /mnt/post-pacstrap
   chmod +x /mnt/post-pacstrap
   arch-chroot /mnt /post-pacstrap
   rm /mnt/post-pacstrap
@@ -235,13 +265,16 @@ bootstrap() {
 }
 
 main() {
-  while getopts "LPc:d:hk:l:n:p:s:t:u:w:" option; do
+  while getopts "LPbc:d:hk:l:n:p:s:t:u:w:" option; do
     case "${option}" in
     L)
       export LTS="-lts"
       ;;
     P)
       export POST_PACSTRAP=1
+      ;;
+    b)
+      export BIOS_BOOTLOADER="-b"
       ;;
     c)
       export COUNTRIES="${OPTARG}"
