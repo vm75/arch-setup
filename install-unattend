@@ -11,6 +11,7 @@ HOSTNAME=server               # -n
 USERNAME=admin                # -u
 PASSWORD=admin                # -p
 SSHKEY=                       # -s
+EFI_BOOTLOADER=               # -e
 
 error() {
   local msg=${1}
@@ -34,15 +35,15 @@ gen_wifi_auth() {
 
   local psk=$(wpa_passphrase "${ssid}" "${key}" | grep -e "\spsk" | cut -d= -f2)
   echo -e "[Security]\nPreSharedKey=${psk}" | tee "${3:-/var/lib/iwd/${ssid}.psk}"
-
-  echo ${ssid}
 }
 
 init_wifi() {
+  ssid=$(echo $0 | cut -d: -f1)
+  key=$(echo $0 | cut -d: -f2-)
   wlint=$(ip a | grep " wl" | grep CAST | sed 's/.* \(wl\w\+\):.*/\1/')
   if [[ $wlint != "" ]] ; then
-    ssid=$(gen_wifi_auth ${ssid} "${key}")
-    if [[ ! -z $ssid ]] ; then
+    gen_wifi_auth ${ssid} "${key}"
+    if [[ ! -z ${ssid} ]] ; then
       iwctl station wlan0 connect ${ssid}
       if [[ $? -ne 0 ]] ; then
         return
@@ -72,34 +73,51 @@ init_os() {
 setup_drive() {
   dev=$1
 
-  fdisk -l ${dev}
+  # create partition
+  if [[ ! -z ${EFI_BOOTLOADER} ]] ; then
+    (
+    echo g      # Create a new empty GPT partition table
+    echo n      # Add a new partition
+    echo        # Auto-select partition number
+    echo        # Auto-select partition start
+    echo +256M  # Partition Size
+    echo t      # Change type
+    echo 1      # EFI parttion
+    echo        # Auto-select partition
+    echo n      # Add a new partition
+    echo        # Auto-select partition number
+    echo        # Auto-select partition start
+    echo        # Auto-select partition end
 
-  # Fdisk
-  (
-  echo g      # Create a new empty GPT partition table
-  echo n      # Add a new partition
-  echo        # Auto-select partition number
-  echo        # Auto-select partition start
-  echo +512M  # Partition Size
-  echo t      # Change type
-  echo 1      # EFI parttion
-  echo        # Auto-select partition
-  echo n      # Add a new partition
-  echo        # Auto-select partition number
-  echo        # Auto-select partition start
-  echo        # Auto-select partition end
+    echo w      # Write changes
+    ) | fdisk -W always ${dev}
+  else
+    (
+    echo o      # Create a new empty GPT partition table
+    echo n      # Add a new partition
+    echo        # Auto-select partition number
+    echo        # Auto-select partition start
+    echo +256M  # Partition Size
+    echo t      # Change type
+    echo c      # EFI parttion
+    echo        # Auto-select partition
+    echo n      # Add a new partition
+    echo        # Auto-select partition number
+    echo        # Auto-select partition start
+    echo        # Auto-select partition end
 
-  echo w      # Write changes
-  ) | fdisk -W always ${dev}
+    echo w      # Write changes
+    ) | fdisk -W always ${dev}
+  fi
 
   checkError "partitioning ${dev}"
 
-  export partEfi=${DEVICE}1
+  export partBoot=${DEVICE}1
   export partRoot=${DEVICE}2
 
   # format partitions
-  mkfs.fat -F32 ${partEfi}
-  checkError "formatting ${partEfi}"
+  mkfs.fat -F32 ${partBoot}
+  checkError "formatting ${partBoot}"
   mkfs.ext4 ${partRoot}
   checkError "formatting ${partRoot}"
 }
@@ -197,7 +215,6 @@ setup_boot() {
 }
 
 bootstrap() {
-  # init_wifi
   init_os
   
   # partition and format target device
@@ -206,8 +223,13 @@ bootstrap() {
   # mount partitions
   mkdir -p /mnt
   mount ${partRoot} /mnt
-  mkdir -p /mnt/boot/efi
-  mount ${partEfi} /mnt/boot/efi
+  if [[ ! -z ${EFI_BOOTLOADER} ]] ; then
+    mkdir -p /mnt/boot/efi
+    mount ${partBoot} /mnt/boot/efi
+  else
+    mkdir -p /mnt/boot
+    mount ${partBoot} /mnt/boot
+  fi
 
   # install to drive
   packages="base linux${LTS} linux${LTS}-headers linux-firmware reflector vim git systemd-swap htop sudo grub efibootmgr openssh archlinux-keyring base-devel man lm_sensors networkmanager openresolv iwd"
@@ -223,17 +245,17 @@ bootstrap() {
   genfstab -U /mnt >> /mnt/etc/fstab
 
   # setup and run post-pacstrap
-  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c ${COUNTRIES} -n ${HOSTNAME} -l ${LOCALE} -p ${PASSWORD} -s ${SSHKEY} -t ${TIMEZONE} -u ${USERNAME}" > /mnt/post-pacstrap
+  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c ${COUNTRIES} ${EFI_BOOTLOADER} -n ${HOSTNAME} -l ${LOCALE} -t ${TIMEZONE} -u ${USERNAME} -p ${PASSWORD} -s '${SSHKEY}'" > /mnt/post-pacstrap
   chmod +x /mnt/post-pacstrap
   arch-chroot /mnt /post-pacstrap
   rm /mnt/post-pacstrap
 
   # unmount partitions
-  umount ${partEfi} ${partRoot}
+  umount ${partBoot} ${partRoot}
 }
 
 main() {
-  while getopts "LPc:d:hl:n:p:s:t:u:" option; do
+  while getopts "LPc:d:ehl:n:p:s:t:u:w:" option; do
     case "${option}" in
     L)
       export LTS="-lts"
@@ -251,6 +273,9 @@ main() {
         export DEVICE="${OPTARG}"
       fi
       ;;
+    e)
+      export EFI_BOOTLOADER="-e"
+      ;;
     h)
       echo "help: TBD"
       exit
@@ -265,7 +290,9 @@ main() {
       export PASSWORD="${OPTARG}"
       ;;
     s)
-      export SSHKEY="${OPTARG}"
+      if [[ ! -z ${OPTARG} ]] ; then
+        export SSHKEY="${OPTARG}"
+      fi
       ;;
     t)
       if [[ -f "/usr/share/zoneinfo/${TIMEZONE}" ]] ; then
@@ -274,6 +301,9 @@ main() {
       ;;
     u)
       export USERNAME="${OPTARG}"
+      ;;
+    w)
+      init_wifi ${OPTARG}
       ;;
     esac
   done
@@ -288,7 +318,9 @@ main() {
     setup_user
     setup_network
     setup_apps
-    setup_boot
+    if [[ ! -z ${EFI_BOOTLOADER} ]] ; then
+      setup_boot
+    fi
   fi
 }
 
