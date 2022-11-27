@@ -180,7 +180,7 @@ setup_apps() {
   systemctl enable systemd-swap
 
   # vi
-  rm /usr/bin/vi
+  rm /usr/bin/vi 2> /dev/null
   ln -s /usr/bin/vim /usr/bin/vi
 
   # sshd
@@ -214,7 +214,7 @@ bootstrap() {
   pacstrap /mnt $packages
 
   # copy wi-fi
-  if [[ $(ls /var/lib/iwd/*.psk) ]] ; then
+  if [[ $(ls /var/lib/iwd/*.psk 2> /dev/null) ]] ; then
     mkdir -p /mnt/var/lib/iwd
     cp /var/lib/iwd/*.psk /mnt/var/lib/iwd/*.psk
   fi
@@ -228,6 +228,7 @@ bootstrap() {
   arch-chroot /mnt /post-pacstrap
   rm /mnt/post-pacstrap
 
+  # unmount partitions
   umount ${partEfi} ${partRoot}
 }
 
