@@ -100,7 +100,7 @@ setup_drive() {
     echo n      # Add a new partition
     echo        # Auto-select partition number
     echo        # Auto-select partition start
-    echo +256M  # Partition Size
+    echo +512M  # Partition Size
     echo t      # Change type
     echo 1      # EFI parttion
     echo        # Auto-select partition
@@ -261,7 +261,7 @@ bootstrap() {
   rm /mnt/post-pacstrap
 
   # unmount partitions
-  umount ${partBoot} ${partRoot}
+  umount ${partBoot} ${partRoot} 2> /dev/null
 }
 
 main() {
