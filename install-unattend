@@ -3,15 +3,16 @@
 SCRIPTNAME=install-unattend
 SCRIPTURL=https://raw.githubusercontent.com/vm75/arch-setup/main/install-unattend
 
+# defaults
 COUNTRIES=US                  # -c
 TIMEZONE=America/Los_Angeles  # -t
 LTS=                          # -L
 LOCALE=en_US.UTF-8            # -l
+KEYMAP=us                     # -k
 HOSTNAME=server               # -n
 USERNAME=admin                # -u
 PASSWORD=admin                # -p
 SSHKEY=                       # -s
-EFI_BOOTLOADER=               # -e
 
 error() {
   local msg=${1}
@@ -74,43 +75,22 @@ setup_drive() {
   dev=$1
 
   # create partition
-  if [[ ! -z ${EFI_BOOTLOADER} ]] ; then
-    (
-    echo g      # Create a new empty GPT partition table
-    echo n      # Add a new partition
-    echo        # Auto-select partition number
-    echo        # Auto-select partition start
-    echo +256M  # Partition Size
-    echo t      # Change type
-    echo 1      # EFI parttion
-    echo        # Auto-select partition
-    echo n      # Add a new partition
-    echo        # Auto-select partition number
-    echo        # Auto-select partition start
-    echo        # Auto-select partition end
+  (
+  echo g      # Create a new empty GPT partition table
+  echo n      # Add a new partition
+  echo        # Auto-select partition number
+  echo        # Auto-select partition start
+  echo +256M  # Partition Size
+  echo t      # Change type
+  echo 1      # EFI parttion
+  echo        # Auto-select partition
+  echo n      # Add a new partition
+  echo        # Auto-select partition number
+  echo        # Auto-select partition start
+  echo        # Auto-select partition end
 
-    echo w      # Write changes
-    ) | fdisk -W always ${dev}
-  else
-    (
-    echo o      # Create a new empty GPT partition table
-    echo n      # Add a new partition
-    echo        # Auto-select partition type
-    echo        # Auto-select partition number
-    echo        # Auto-select partition start
-    echo +256M  # Partition Size
-    echo t      # Change type
-    echo c      # VFAT parttion
-    echo        # Auto-select partition
-    echo n      # Add a new partition
-    echo        # Auto-select partition type
-    echo        # Auto-select partition number
-    echo        # Auto-select partition start
-    echo        # Auto-select partition end
-
-    echo w      # Write changes
-    ) | fdisk -W always ${dev}
-  fi
+  echo w      # Write changes
+  ) | fdisk -W always ${dev}
 
   checkError "partitioning ${dev}"
 
@@ -137,11 +117,14 @@ setup_datetime() {
   fi
 }
 
-setup_locale() {
+setup_language() {
   export LANG=${LOCALE}
   echo LANG=${LOCALE} > /etc/locale.conf
   sed -e "s/^#${LOCALE}/${LOCALE}/" -i /etc/locale.gen
   locale-gen
+
+  # keymap
+  echo "KEYMAP=${KEYMAP}" > /etc/vconsole.conf
 }
 
 setup_hostname() {
@@ -210,9 +193,9 @@ setup_apps() {
   gpg --keyserver keyserver.ubuntu.com --recv-keys 5C4A26CD4CC8C397
 }
 
-setup_boot() {
+setup_bootloader() {
   # grub setup
-  grub-install --target=x86_64-efi --bootloader-id=GRUB --efi-directory=/boot/efi
+  grub-install --target=x86_64-efi --bootloader-id=GRUB --efi-directory=/boot
   grub-mkconfig -o /boot/grub/grub.cfg
 }
 
@@ -225,13 +208,8 @@ bootstrap() {
   # mount partitions
   mkdir -p /mnt
   mount ${partRoot} /mnt
-  if [[ ! -z ${EFI_BOOTLOADER} ]] ; then
-    mkdir -p /mnt/boot/efi
-    mount ${partBoot} /mnt/boot/efi
-  else
-    mkdir -p /mnt/boot
-    mount ${partBoot} /mnt/boot
-  fi
+  mkdir -p /mnt/boot
+  mount ${partBoot} /mnt/boot
 
   # install to drive
   packages="base linux${LTS} linux${LTS}-headers linux-firmware reflector vim git systemd-swap htop sudo grub efibootmgr openssh archlinux-keyring base-devel man lm_sensors networkmanager openresolv iwd"
@@ -247,7 +225,7 @@ bootstrap() {
   genfstab -U /mnt >> /mnt/etc/fstab
 
   # setup and run post-pacstrap
-  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c ${COUNTRIES} ${EFI_BOOTLOADER} -n ${HOSTNAME} -l ${LOCALE} -t ${TIMEZONE} -u ${USERNAME} -p ${PASSWORD} -s '${SSHKEY}'" > /mnt/post-pacstrap
+  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c ${COUNTRIES} -n ${HOSTNAME} -l ${LOCALE} -k ${KEYMAP} -t ${TIMEZONE} -u ${USERNAME} -p ${PASSWORD} -s '${SSHKEY}'" > /mnt/post-pacstrap
   chmod +x /mnt/post-pacstrap
   arch-chroot /mnt /post-pacstrap
   rm /mnt/post-pacstrap
@@ -257,7 +235,7 @@ bootstrap() {
 }
 
 main() {
-  while getopts "LPc:d:ehl:n:p:s:t:u:w:" option; do
+  while getopts "LPc:d:hk:l:n:p:s:t:u:w:" option; do
     case "${option}" in
     L)
       export LTS="-lts"
@@ -275,12 +253,12 @@ main() {
         export DEVICE="${OPTARG}"
       fi
       ;;
-    e)
-      export EFI_BOOTLOADER="-e"
-      ;;
     h)
       echo "help: TBD"
       exit
+      ;;
+    k)
+      export KEYMAP="${OPTARG}"
       ;;
     l)
       export LOCALE="${OPTARG}"
@@ -315,14 +293,12 @@ main() {
     bootstrap
   else
     setup_datetime
-    setup_locale
+    setup_language
     setup_hostname
     setup_user
     setup_network
     setup_apps
-    if [[ ! -z ${EFI_BOOTLOADER} ]] ; then
-      setup_boot
-    fi
+    setup_bootloader
   fi
 }
 
