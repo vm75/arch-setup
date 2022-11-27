@@ -1,0 +1,288 @@
+#!/bin/bash
+
+SCRIPT=$(realpath "${0}")
+SCRIPTDIR=$(dirname "${SCRIPT}")
+
+SCRIPTURL=https://raw.githubusercontent.com/vm75/arch-setup/main/install-unattend
+
+COUNTRIES=US                  # -c
+TIMEZONE=America/Los_Angeles  # -t
+LTS=                          # -L
+LOCALE=en_US.UTF-8            # -l
+HOSTNAME=server               # -n
+USERNAME=admin                # -u
+PASSWORD=admin                # -p
+SSHKEY=                       # -s
+
+error() {
+  local msg=${1}
+  echo -e "\e[31m${SCRIPTNAME}: $1\e[0m"
+  exit -1
+}
+
+checkError() {
+  if [[ $? -ne 0 ]] ; then
+    error "Error while $1"
+  fi
+}
+
+gen_wifi_auth() {
+  local ssid=$1
+  local key=$2
+
+  if [[ -z ${ssid} || -z ${key} ]] ; then
+    error "No valid ssid/key pair"
+  fi
+
+  local psk=$(wpa_passphrase "${ssid}" "${key}" | grep -e "\spsk" | cut -d= -f2)
+  echo -e "[Security]\nPreSharedKey=${psk}" | tee "${3:-/var/lib/iwd/${ssid}.psk}"
+
+  echo ${ssid}
+}
+
+init_wifi() {
+  wlint=$(ip a | grep " wl" | grep CAST | sed 's/.* \(wl\w\+\):.*/\1/')
+  if [[ $wlint != "" ]] ; then
+    ssid=$(gen_wifi_auth ${ssid} "${key}")
+    if [[ ! -z $ssid ]] ; then
+      iwctl station wlan0 connect ${ssid}
+      if [[ $? -ne 0 ]] ; then
+        return
+      fi
+
+      echo "Waiting 10 secs..."
+      sleep 10
+    fi
+  fi
+}
+
+init_os() {
+  pacman -Syy --noconfirm
+  pacman -Sy --noconfirm reflector archlinux-keyring
+  checkError "initializing pacman"
+
+  echo "Setting up reflectors..."
+  reflector -c "${COUNTRIES}" -f 12 -l 10 -n 12 --save /etc/pacman.d/mirrorlist
+  checkError "setting reflectors"
+
+  # set date-time
+  setup_datetime
+}
+
+partition_target() {
+  dev=$1
+
+  fdisk -l ${dev}
+
+  # Fdisk
+  (
+  echo g      # Create a new empty GPT partition table
+  echo n      # Add a new partition
+  echo        # Auto-select partition number
+  echo        # Auto-select partition start
+  echo +512M  # Partition Size
+  echo t      # Change type
+  echo 1      # EFI parttion
+  echo        # Auto-select partition
+  echo n      # Add a new partition
+  echo        # Auto-select partition number
+  echo        # Auto-select partition start
+  echo        # Auto-select partition end
+
+  echo w      # Write changes
+  ) | fdisk -W always ${dev}
+}
+
+setup_datetime() {
+  hwclock --systohc
+  timedatectl set-ntp true
+  systemctl enable systemd-timesyncd.service
+  checkError "enabling systemd-timesyncd"
+
+  if [[ ! -z ${POST_PACSTRAP} ]] ; then
+    timedatectl set-timezone ${TIMEZONE}
+    checkError "setting timezone"
+    ln -s /usr/share/zoneinfo/${TIMEZONE} /etc/localtime
+  fi
+}
+
+setup_locale() {
+  export LANG=${LOCALE}
+  echo LANG=${LOCALE} > /etc/locale.conf
+  sed -e "s/^#${LOCALE}/${LOCALE}/" -i /etc/locale.gen
+  locale-gen
+}
+
+setup_hostname() {
+  if [[ ${HOSTNAME} =~ "." ]] ; then
+    DOMAINAME=$(echo ${HOSTNAME} | cut -d. -f2-)
+    HOSTNAME=$(echo ${HOSTNAME} | cut -d. -f1)
+  fi
+  echo ${HOSTNAME} > /etc/hostname
+  echo "127.0.0.1 localhost" > /etc/hosts
+  echo "::1 localhost" >> /etc/hosts
+  if [[ -z "${DOMAINAME}" ]] ; then
+    echo "127.0.1.1 ${HOSTNAME}" >> /etc/hosts
+  else
+    echo "127.0.1.1 ${HOSTNAME}.${DOMAINNAME} ${HOSTNAME}" >> /etc/hosts
+  fi
+}
+
+setup_user() {
+  # create user
+  cp -r /etc/skel /home/${USERNAME}
+  groupadd -g 1000 ${USERNAME}
+  chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+  useradd -u 1000 -g ${USERNAME} -G wheel -s /bin/bash ${USERNAME}
+  echo "${USERNAME}:${PASSWORD}" | chpasswd
+
+  # sudo
+  mkdir -p /etc/sudoers.d
+  echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USERNAME}
+
+  # ssh-key
+  if [[ ! -z ${SSHKEY} ]] ; then
+    mkdir -p /home/${USERNAME}/.ssh
+    echo "${SSHKEY}" > /home/${USERNAME}/.ssh/authorized_keys
+    chmod 644 /home/${USERNAME}/.ssh/authorized_keys
+    chmod 700 /home/${USERNAME}/.ssh
+    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh
+  fi
+}
+
+setup_network() {
+  echo -e "[Match]\nName=en*\n[Network]\nDHCP=yes" > /etc/systemd/network/20-wired.network
+  chmod 755 /etc/systemd/network/20-wired.network
+
+  systemctl enable systemd-networkd.service
+  systemctl enable systemd-resolved.service
+
+  # enable network configuration
+  systemctl enable iwd
+  mkdir -p /etc/iwd
+  echo -e "[General]\nEnableNetworkConfiguration=true" > /etc/iwd/main.conf
+}
+
+setup_apps() {
+  # swap
+  systemctl enable systemd-swap
+
+  # vi
+  rm /usr/bin/vi
+  ln -s /usr/bin/vim /usr/bin/vi
+
+  # sshd
+  systemctl enable sshd.service
+
+  # key for aur
+  gpg --keyserver keyserver.ubuntu.com --recv-keys 5C4A26CD4CC8C397
+}
+
+setup_boot() {
+  grub-install --target=x86_64-efi --bootloader-id=GRUB --efi-directory=/boot/efi
+  grub-mkconfig -o /boot/grub/grub.cfg
+}
+
+bootstrap() {
+  # init_wifi
+  init_os
+  
+  # partition target device
+  partition_target ${DEVICE}
+  partEfi=${DEVICE}1
+  partRoot=${DEVICE}2
+
+  # format partitions
+  mkfs.fat -F32 ${partEfi}
+  mkfs.ext4 ${partRoot}
+
+  # mount partitions
+  mkdir -p /mnt
+  mount ${partRoot} /mnt
+  mkdir -p /mnt/boot/efi
+  mount ${partEfi} /mnt/boot/efi
+
+  # install to drive
+  packages="base linux${LTS} linux${LTS}-headers linux-firmware reflector vim git systemd-swap htop sudo grub efibootmgr openssh archlinux-keyring base-devel man lm_sensors networkmanager openresolv iwd"
+  pacstrap /mnt $packages
+
+  # copy wi-fi
+  if [[ $(ls /var/lib/iwd/*.psk) ]] ; then
+    mkdir -p /mnt/var/lib/iwd
+    cp /var/lib/iwd/*.psk /mnt/var/lib/iwd/*.psk
+  fi
+
+  # generate fstab
+  genfstab -U /mnt >> /mnt/etc/fstab
+
+  # setup and run post-pacstrap
+  mkdir -p /mnt/tmp
+  echo "curl -L ${SCRIPTURL} | bash -s -- -c ${COUNTRIES} -h ${HOSTNAME} -l ${LOCALE} -p ${PASSWORD} -s ${SSHKEY} -t ${TIMEZONE} -u ${USERNAME}" > /mnt/tmp/post-pacstrap
+  chmod +x /mnt/tmp/post-pacstrap
+  arch-chroot /mnt /tmp/post-pacstrap
+  rm /tmp/post-pacstrap
+
+  umount ${partEfi} ${partRoot}
+}
+
+main() {
+  while getopts "LPc:d:hl:n:p:s:t:u:" option; do
+    case "${option}" in
+    L)
+      export LTS="-lts"
+      ;;
+    P)
+      export POST_PACSTRAP=1
+      ;;
+    c)
+      export COUNTRIES="${OPTARG}"
+      ;;
+    d)
+      if [[ -b /dev/${OPTARG} ]] ; then
+        export DEVICE="/dev/${OPTARG}"
+      elif [[ -b ${OPTARG} ]] ; then
+        export DEVICE="${OPTARG}"
+      fi
+      ;;
+    h)
+      echo "help: TBD"
+      exit
+      ;;
+    l)
+      export LOCALE="${OPTARG}"
+      ;;
+    n)
+      export HOSTNAME="${OPTARG}"
+      ;;
+    p)
+      export PASSWORD="${OPTARG}"
+      ;;
+    s)
+      export SSHKEY="${OPTARG}"
+      ;;
+    t)
+      if [[ -f "/usr/share/zoneinfo/${TIMEZONE}" ]] ; then
+        export TIMEZONE="${OPTARG}"
+      fi
+      ;;
+    u)
+      export USERNAME="${OPTARG}"
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+
+  if [[ -z ${POST_PACSTRAP} ]] ; then
+    bootstrap
+  else
+    setup_datetime
+    setup_locale
+    setup_hostname
+    setup_user
+    setup_network
+    setup_apps
+    setup_boot
+  fi
+}
+
+main "$@"
