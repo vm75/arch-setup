@@ -236,6 +236,9 @@ setup_apps() {
 
   # key for aur
   gpg --keyserver keyserver.ubuntu.com --recv-keys 5C4A26CD4CC8C397
+
+  # ssh keygen
+  ssh-keygen -q -t rsa -N '' -f ~/.ssh/id_rsa <<<y >/dev/null 2>&1
 }
 
 setup_bootloader() {
