@@ -176,18 +176,14 @@ setup_language() {
 }
 
 setup_hostname() {
+  local host
   if [[ ${HOSTNAME} =~ "." ]] ; then
-    DOMAINAME=$(echo ${HOSTNAME} | cut -d. -f2-)
-    HOSTNAME=$(echo ${HOSTNAME} | cut -d. -f1)
+    host=$(echo ${HOSTNAME} | cut -d. -f1)
   fi
   echo ${HOSTNAME} > /etc/hostname
   echo "127.0.0.1 localhost" > /etc/hosts
   echo "::1 localhost" >> /etc/hosts
-  if [[ -z "${DOMAINAME}" ]] ; then
-    echo "127.0.1.1 ${HOSTNAME}" >> /etc/hosts
-  else
-    echo "127.0.1.1 ${HOSTNAME}.${DOMAINNAME} ${HOSTNAME}" >> /etc/hosts
-  fi
+  echo "127.0.1.1 ${HOSTNAME} ${host}" >> /etc/hosts
 }
 
 setup_user() {
