@@ -27,6 +27,24 @@ checkError() {
   fi
 }
 
+usage() {
+  echo "usage: ${SCRIPTNAME} -d <device> [options...]"
+  echo "  options:"
+  echo "    -c <mirror countries=US>"
+  echo "    -t <timezone=America/Los_Angeles>"
+  echo "    -l <locale=en_US.UTF-8>"
+  echo "    -k <keymap=us>"
+  echo "    -n <hostname=server[.domain]>"
+  echo "    -u <username=admin>"
+  echo "    -p <password=admin>"
+  echo "    -s <public sshkey>"
+  echo "    -w <wifi SSID>:<password>"
+  echo "    -b                                # use BIOS bootloader"
+  echo "    -L                                # use LTS"
+
+  exit 0
+}
+
 gen_wifi_auth() {
   local ssid=$1
   local key=$2
@@ -115,12 +133,12 @@ setup_drive() {
 
   checkError "partitioning ${dev}"
 
-  if [[ -e ${DEVICE}1 && -e ${DEVICE}2 ]] ; then
-    export partBoot=${DEVICE}1
-    export partRoot=${DEVICE}2
-  elif [[ -e ${DEVICE}p1 && -e ${DEVICE}p2 ]] ; then
-    export partBoot=${DEVICE}p1
-    export partRoot=${DEVICE}p2
+  if [[ -e ${DRIVE}1 && -e ${DRIVE}2 ]] ; then
+    export partBoot=${DRIVE}1
+    export partRoot=${DRIVE}2
+  elif [[ -e ${DRIVE}p1 && -e ${DRIVE}p2 ]] ; then
+    export partBoot=${DRIVE}p1
+    export partRoot=${DRIVE}p2
   else
     error "Error detecting partitions"
   fi
@@ -185,13 +203,14 @@ setup_user() {
   echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USERNAME}
 
   # ssh-key
+  mkdir -p /home/${USERNAME}/.ssh
+  touch /home/${USERNAME}/.ssh/authorized_keys
   if [[ ! -z ${SSHKEY} ]] ; then
-    mkdir -p /home/${USERNAME}/.ssh
-    echo "${SSHKEY}" > /home/${USERNAME}/.ssh/authorized_keys
-    chmod 644 /home/${USERNAME}/.ssh/authorized_keys
-    chmod 700 /home/${USERNAME}/.ssh
-    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh
+    echo "${SSHKEY}" >> /home/${USERNAME}/.ssh/authorized_keys
   fi
+  chmod 700 /home/${USERNAME}/.ssh
+  chmod 600 /home/${USERNAME}/.ssh/authorized_keys
+  chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh
 }
 
 setup_network() {
@@ -226,18 +245,18 @@ setup_apps() {
 setup_bootloader() {
   # grub setup
   if [[ ${BIOS_BOOTLOADER} == -b ]] ; then
-    grub-install --target=i386-pc ${DEVICE}
+    grub-install --target=i386-pc ${DRIVE}
   else
-    grub-install --target=x86_64-efi --bootloader-id=GRUB --efi-directory=/boot/efi
+    grub-install --target=x86_64-efi --bootloader-id=GRUB --efi-directory=/boot
   fi
   grub-mkconfig -o /boot/grub/grub.cfg
 }
 
 bootstrap() {
   init_os
-  
-  # partition and format target device
-  setup_drive ${DEVICE}
+
+  # partition and format target drive
+  setup_drive ${DRIVE}
 
   # mount partitions
   mkdir -p /mnt
@@ -255,7 +274,7 @@ bootstrap() {
   if [[ $(ls /var/lib/iwd/*.psk 2> /dev/null) ]] ; then
     mkdir -p /mnt/var/lib/iwd
     chmod 700 /mnt/var/lib/iwd
-    cp -a /var/lib/iwd/*.psk /mnt/var/lib/iwd/*.psk
+    cp -a /var/lib/iwd/*.psk /mnt/var/lib/iwd/
   fi
 
   # generate fstab
@@ -288,13 +307,13 @@ main() {
       ;;
     d)
       if [[ -b /dev/${OPTARG} ]] ; then
-        export DEVICE="/dev/${OPTARG}"
+        export DRIVE="/dev/${OPTARG}"
       elif [[ -b ${OPTARG} ]] ; then
-        export DEVICE="${OPTARG}"
+        export DRIVE="${OPTARG}"
       fi
       ;;
     h)
-      echo "help: TBD"
+      usage
       exit
       ;;
     k)
@@ -328,6 +347,10 @@ main() {
     esac
   done
   shift $((OPTIND-1))
+
+  if [[ -z ${DRIVE} ]] ; then
+    error "No valid drive found"
+  fi
 
   if [[ -z ${POST_PACSTRAP} ]] ; then
     bootstrap
