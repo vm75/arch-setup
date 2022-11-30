@@ -38,7 +38,6 @@ usage() {
   echo "    -u <username=admin>"
   echo "    -p <password=admin>"
   echo "    -s <public sshkey>"
-  echo "    -i <static IP for 1st ethernet device>"
   echo "    -w <wifi SSID>:<password>"
   echo "    -b                                # use BIOS bootloader"
   echo "    -L                                # use LTS"
