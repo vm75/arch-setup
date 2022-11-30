@@ -14,7 +14,6 @@ USERNAME=admin                # -u
 PASSWORD=admin                # -p
 SSHKEY=                       # -s
 BIOS_BOOTLOADER=              # -b
-IPADDR=                       # -i
 
 error() {
   local msg=${1}
@@ -223,10 +222,6 @@ setup_network() {
   systemctl enable iwd
   mkdir -p /etc/iwd
   echo -e "[General]\nEnableNetworkConfiguration=true" > /etc/iwd/main.conf
-
-  if [[ ! -z ${IPADDR} && ${IPADDR} =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$ ]] ; then
-    ip address add ${IPADDR} broadcast + dev $(ls -1 /sys/class/net | grep -e '^e' -m 1)
-  fi
 }
 
 setup_apps() {
@@ -286,7 +281,7 @@ bootstrap() {
   genfstab -U /mnt >> /mnt/etc/fstab
 
   # setup and run post-pacstrap
-  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c '${COUNTRIES}' ${BIOS_BOOTLOADER} -n '${HOSTNAME}' -l '${LOCALE}' -k '${KEYMAP}' -t '${TIMEZONE}' -u '${USERNAME}' -p '${PASSWORD}' -s '${SSHKEY}' -i '${IPADDR}'" > /mnt/post-pacstrap
+  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c '${COUNTRIES}' ${BIOS_BOOTLOADER} -n '${HOSTNAME}' -l '${LOCALE}' -k '${KEYMAP}' -t '${TIMEZONE}' -u '${USERNAME}' -p '${PASSWORD}' -s '${SSHKEY}'" > /mnt/post-pacstrap
   chmod +x /mnt/post-pacstrap
   arch-chroot /mnt /post-pacstrap
   rm /mnt/post-pacstrap
@@ -300,7 +295,7 @@ main() {
     export BIOS_BOOTLOADER="-b"
   fi
 
-  while getopts "LPbc:d:hi:k:l:n:p:s:t:u:w:" option; do
+  while getopts "LPbc:d:hk:l:n:p:s:t:u:w:" option; do
     case "${option}" in
     L)
       export LTS="-lts"
@@ -324,9 +319,6 @@ main() {
     h)
       usage
       exit
-      ;;
-    i)
-      export IPADDR=${OPTARG}
       ;;
     k)
       export KEYMAP="${OPTARG}"
