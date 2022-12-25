@@ -159,8 +159,8 @@ setup_datetime() {
   checkError "enabling systemd-timesyncd"
 
   if [[ ! -z ${POST_PACSTRAP} ]] ; then
-    timedatectl set-timezone ${TIMEZONE}
-    checkError "setting timezone"
+    # timedatectl set-timezone ${TIMEZONE}
+    # checkError "setting timezone"
     ln -s /usr/share/zoneinfo/${TIMEZONE} /etc/localtime
   fi
 }
