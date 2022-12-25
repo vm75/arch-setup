@@ -290,7 +290,7 @@ bootstrap() {
 }
 
 main() {
-  if [[ ! -d /etc/firmware/efi ]] ; then
+  if [[ ! -d /sys/firmware/efi ]] ; then
     export BIOS_BOOTLOADER="-b"
   fi
 
