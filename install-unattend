@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 SCRIPTNAME=install-unattend
 SCRIPTURL=https://raw.githubusercontent.com/vm75/arch-setup/main/install-unattend
