@@ -373,8 +373,11 @@ main() {
     export BIOS_BOOTLOADER="-b"
   fi
 
-  while getopts "LPbc:d:e:f:hk:l:n:p:s:t:u:w:" option; do
+  while getopts "DLPbc:d:e:f:hk:l:n:p:s:t:u:w:" option; do
     case "${option}" in
+    D)
+      set -x
+      ;;
     L)
       export LTS="-lts"
       ;;
