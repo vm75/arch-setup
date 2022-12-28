@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# log
+LOG_FILE=install.log
+exec > >(tee $LOG_FILE) 2>&1
+
 SCRIPTNAME=install-unattend
 SCRIPTURL=https://raw.githubusercontent.com/vm75/arch-setup/main/install-unattend
 
@@ -295,10 +299,7 @@ bootstrap() {
   mount ${ROOT_PART} /mnt
   if [[ ${BIOS_BOOTLOADER} != -b ]] ; then
     mkdir -p /mnt/boot
-    if [[ -b ${EFI_PART} ]] ; then
-      mount ${EFI_PART} /mnt/boot
-    else
-      mount ${BOOT_PART} /mnt/boot
+    mount ${EFI_PART:-${BOOT_PART}} /mnt/boot
     fi
   fi
 
@@ -394,7 +395,9 @@ main() {
       fi
       ;;
     e)
-      EFI_PART=${OPTARG}
+      if [[ -b ${OPTARG} ]] ; then
+        EFI_PART=${OPTARG}
+      fi
       ;;
     f)
       export USER_FILES="${OPTARG}"
@@ -439,6 +442,18 @@ main() {
 
   if [[ -z ${POST_PACSTRAP} ]] ; then
     bootstrap
+
+    echo
+    echo "Installed with these settings:"
+    echo "  ROOT PARTITION=${ROOT_PART}"
+    echo "  BOOT PARTITION=${EFI_PART:-${BOOT_PART}}"
+    echo "  TIMEZONE=${TIMEZONE}"
+    echo "  LOCALE=${LOCALE}"
+    echo "  KEYMAP=${KEYMAP}"
+    echo "  HOSTNAME=${HOSTNAME}"
+    echo "  USERNAME=${USERNAME}"
+    echo "  PASSWORD=${PASSWORD}"
+    echo "  MIRROR COUNTRIES=${COUNTRIES}"
   else
     setup_datetime
     setup_language
