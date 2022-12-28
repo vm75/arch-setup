@@ -12,8 +12,10 @@ KEYMAP=us                     # -k
 HOSTNAME=server               # -n
 USERNAME=admin                # -u
 PASSWORD=admin                # -p
-SSHKEY=                       # -s
+SSH_KEY=                      # -s
 BIOS_BOOTLOADER=              # -b
+USER_UID=1000
+USER_GID=1000
 
 error() {
   local msg=${1}
@@ -30,6 +32,7 @@ checkError() {
 usage() {
   echo "usage: ${SCRIPTNAME} -d <device> [options...]"
   echo "  options:"
+  echo "    -e <alternate efi partition>"
   echo "    -c <mirror countries=US>"
   echo "    -t <timezone=America/Los_Angeles>"
   echo "    -l <locale=en_US.UTF-8>"
@@ -38,6 +41,7 @@ usage() {
   echo "    -u <username=admin>"
   echo "    -p <password=admin>"
   echo "    -s <public sshkey>"
+  echo "    -f <directory containing user files>"
   echo "    -w <wifi SSID>:<password>"
   echo "    -b                                # use BIOS bootloader"
   echo "    -L                                # use LTS"
@@ -83,8 +87,10 @@ init_os() {
 
   # set mirrors
   echo "Setting up reflectors..."
-  reflector -c "${COUNTRIES}" -f 12 -l 10 -n 12 --save /etc/pacman.d/mirrorlist
-  checkError "setting reflectors"
+  if [[ ! -f /etc/pacman.d/mirrorlist ]] ; then
+    reflector -c "${COUNTRIES}" -f 12 -l 10 -n 12 --save /etc/pacman.d/mirrorlist
+    checkError "setting reflectors"
+  fi
 
   # set date-time
   setup_datetime
@@ -133,23 +139,23 @@ setup_drive() {
 
   checkError "partitioning ${dev}"
 
-  if [[ -e ${DRIVE}1 && -e ${DRIVE}2 ]] ; then
-    export partBoot=${DRIVE}1
-    export partRoot=${DRIVE}2
-  elif [[ -e ${DRIVE}p1 && -e ${DRIVE}p2 ]] ; then
-    export partBoot=${DRIVE}p1
-    export partRoot=${DRIVE}p2
+  if [[ -b ${DRIVE}1 && -b ${DRIVE}2 ]] ; then
+    export BOOT_PART=${DRIVE}1
+    export ROOT_PART=${DRIVE}2
+  elif [[ -b ${DRIVE}p1 && -b ${DRIVE}p2 ]] ; then
+    export BOOT_PART=${DRIVE}p1
+    export ROOT_PART=${DRIVE}p2
   else
     error "Error detecting partitions"
   fi
 
   # format partitions
   if [[ ${BIOS_BOOTLOADER} != -b ]] ; then
-    mkfs.fat -F32 ${partBoot}
-    checkError "formatting ${partBoot}"
+    mkfs.fat -F32 ${BOOT_PART}
+    checkError "formatting ${BOOT_PART}"
   fi
-  mkfs.ext4 ${partRoot}
-  checkError "formatting ${partRoot}"
+  mkfs.ext4 -m 0 ${ROOT_PART}
+  checkError "formatting ${ROOT_PART}"
 }
 
 setup_datetime() {
@@ -188,25 +194,13 @@ setup_hostname() {
 
 setup_user() {
   # create user
-  cp -r /etc/skel /home/${USERNAME}
-  groupadd -g 1000 ${USERNAME}
-  useradd -u 1000 -g ${USERNAME} -G wheel -s /bin/bash ${USERNAME}
+  groupadd -g ${USER_UID} ${USERNAME}
+  useradd -u ${USER_GID} -g ${USERNAME} -G wheel -s /bin/bash ${USERNAME}
   echo "${USERNAME}:${PASSWORD}" | chpasswd
-  chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
 
   # sudo
   mkdir -p /etc/sudoers.d
   echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USERNAME}
-
-  # ssh-key
-  mkdir -p /home/${USERNAME}/.ssh
-  touch /home/${USERNAME}/.ssh/authorized_keys
-  if [[ ! -z ${SSHKEY} ]] ; then
-    echo "${SSHKEY}" >> /home/${USERNAME}/.ssh/authorized_keys
-  fi
-  chmod 700 /home/${USERNAME}/.ssh
-  chmod 600 /home/${USERNAME}/.ssh/authorized_keys
-  chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh
 }
 
 setup_network() {
@@ -223,6 +217,40 @@ setup_network() {
   echo -e "[General]\nEnableNetworkConfiguration=true" > /etc/iwd/main.conf
 }
 
+install_from_git() {
+  aur=$1
+  cd /tmp/aur
+  rm -rf "$aur"
+  git clone https://aur.archlinux.org/${aur}.git
+  if [[ $? -ne 0 ]] ; then
+    return
+  fi
+  cd "$aur"
+  makepkg -si --noconfirm
+}
+
+install_from_pkg() {
+  aur=$(basename ${1/.pkgbuild/})
+  dir="/tmp/aur/${aur}"
+  rm -rf "${dir}"
+  mkdir "${dir}"
+  cp ${1} "${dir}/PKGBUILD"
+  cd "${dir}"
+  makepkg -si --noconfirm
+}
+
+install_aur() {
+  mkdir -p /tmp/aur
+
+  for aur in $@ ; do
+    if [[ "$aur" =~ .pkgbuild$ ]] ; then
+      install_from_pkg $aur
+    else
+      install_from_git $aur
+    fi
+  done
+}
+
 setup_apps() {
   # swap
   systemctl enable systemd-swap
@@ -234,11 +262,16 @@ setup_apps() {
   # sshd
   systemctl enable sshd.service
 
+  # ssh keygen
+  if [[ ! -f ~/.ssh/id_rsa ]] ; then
+    ssh-keygen -q -t rsa -N '' -f ~/.ssh/id_rsa <<<y >/dev/null 2>&1
+  fi
+
   # key for aur
   gpg --keyserver keyserver.ubuntu.com --recv-keys 5C4A26CD4CC8C397
 
-  # ssh keygen
-  ssh-keygen -q -t rsa -N '' -f ~/.ssh/id_rsa <<<y >/dev/null 2>&1
+  # install aur
+  install_aur udevil
 }
 
 setup_bootloader() {
@@ -259,14 +292,20 @@ bootstrap() {
 
   # mount partitions
   mkdir -p /mnt
-  mount ${partRoot} /mnt
+  mount ${ROOT_PART} /mnt
   if [[ ${BIOS_BOOTLOADER} != -b ]] ; then
     mkdir -p /mnt/boot
-    mount ${partBoot} /mnt/boot
+    if [[ -b ${EFI_PART} ]] ; then
+      mount ${EFI_PART} /mnt/boot
+    else
+      mount ${BOOT_PART} /mnt/boot
+    fi
   fi
 
   # install to drive
-  packages="base linux${LTS} linux${LTS}-headers linux-firmware reflector vim git systemd-swap htop sudo grub efibootmgr openssh archlinux-keyring base-devel man lm_sensors networkmanager openresolv iwd inetutils dosfstools"
+  packages="base linux${LTS} linux${LTS}-headers linux-firmware reflector vim git \
+            systemd-swap htop sudo grub efibootmgr openssh archlinux-keyring \
+            base-devel man lm_sensors networkmanager openresolv iwd inetutils dosfstools"
   pacstrap /mnt $packages
 
   # copy wi-fi
@@ -279,14 +318,53 @@ bootstrap() {
   # generate fstab
   genfstab -U /mnt >> /mnt/etc/fstab
 
+  # user files
+  USER_HOME=/mnt/home/${USERNAME}
+  cp -r /mnt/etc/skel ${USER_HOME}
+  if [[ -d ${USER_FILES} ]] ; then
+    cp -ar "${USER_FILES}/." ${USER_HOME}
+  elif [[ -f ${USER_FILES} ]] ; then
+    cd ${USER_HOME}
+    case ${USER_FILES} in
+      *.tar)
+        tar xf "${USER_FILES}"
+        ;;
+      *.tar.gz|*.tgz)
+        tar xzf "${USER_FILES}"
+        ;;
+      *.tar.bz2|*.tbz)
+        tar xjf "${USER_FILES}"
+        ;;
+      *.tar.xz|*.txz)
+        tar xJf "${USER_FILES}"
+        ;;
+      *)
+        cp "${USER_FILES}" .
+        ;;
+    esac
+    cd -
+  fi
+
+  # ssh-keys
+  if [[ ! -z ${SSH_KEY} ]] ; then
+    mkdir -p ${USER_HOME}/.ssh
+    echo "${SSH_KEY}" >> ${USER_HOME}/.ssh/authorized_keys
+  fi
+
+  # ownership and permission
+  chmod 700 ${USER_HOME}/.ssh
+  chmod 600 ${USER_HOME}/.ssh/authorized_keys
+  chown -R ${USER_UID}:${USER_GID} ${USER_HOME}
+
   # setup and run post-pacstrap
-  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c '${COUNTRIES}' ${BIOS_BOOTLOADER} -n '${HOSTNAME}' -l '${LOCALE}' -k '${KEYMAP}' -t '${TIMEZONE}' -u '${USERNAME}' -p '${PASSWORD}' -s '${SSHKEY}'" > /mnt/post-pacstrap
+  cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist
+  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c '${COUNTRIES}' ${BIOS_BOOTLOADER} -n '${HOSTNAME}' -l '${LOCALE}' -k '${KEYMAP}' -t '${TIMEZONE}' -u '${USERNAME}' -p '${PASSWORD}'" > /mnt/post-pacstrap
   chmod +x /mnt/post-pacstrap
   arch-chroot /mnt /post-pacstrap
   rm /mnt/post-pacstrap
 
   # unmount partitions
-  umount ${partBoot} ${partRoot} 2> /dev/null
+  umount ${BOOT_PART} ${ROOT_PART} 2> /dev/null
 }
 
 main() {
@@ -294,7 +372,7 @@ main() {
     export BIOS_BOOTLOADER="-b"
   fi
 
-  while getopts "LPbc:d:hk:l:n:p:s:t:u:w:" option; do
+  while getopts "LPbc:d:e:f:hk:l:n:p:s:t:u:w:" option; do
     case "${option}" in
     L)
       export LTS="-lts"
@@ -315,6 +393,12 @@ main() {
         export DRIVE="${OPTARG}"
       fi
       ;;
+    e)
+      EFI_PART=${OPTARG}
+      ;;
+    f)
+      export USER_FILES="${OPTARG}"
+      ;;
     h)
       usage
       exit
@@ -332,9 +416,7 @@ main() {
       export PASSWORD="${OPTARG}"
       ;;
     s)
-      if [[ ! -z ${OPTARG} ]] ; then
-        export SSHKEY="${OPTARG}"
-      fi
+      export SSH_KEY="${OPTARG}"
       ;;
     t)
       if [[ -f "/usr/share/zoneinfo/${TIMEZONE}" ]] ; then
