@@ -300,7 +300,6 @@ bootstrap() {
   if [[ ${BIOS_BOOTLOADER} != -b ]] ; then
     mkdir -p /mnt/boot
     mount ${EFI_PART:-${BOOT_PART}} /mnt/boot
-    fi
   fi
 
   # install to drive
