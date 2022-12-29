@@ -198,7 +198,7 @@ setup_hostname() {
 setup_user() {
   # create user
   groupadd -g ${USER_UID} ${USERNAME}
-  useradd -u ${USER_GID} -g ${USERNAME} -G wheel -s /bin/bash ${USERNAME}
+  useradd -u ${USER_GID} -g ${USERNAME} -G wheel,audio -s /bin/bash ${USERNAME}
   echo "${USERNAME}:${PASSWORD}" | chpasswd
 
   # sudo
@@ -258,6 +258,9 @@ setup_apps() {
   # swap
   systemctl enable systemd-swap
 
+  # crontab
+  systemctl enable cronie
+
   # vi
   rm /usr/bin/vi 2> /dev/null
   ln -s /usr/bin/vim /usr/bin/vi
@@ -307,9 +310,11 @@ bootstrap() {
   fi
 
   # install to drive
-  packages="base linux${LTS} linux${LTS}-headers linux-firmware reflector vim git \
-            systemd-swap htop sudo grub efibootmgr openssh archlinux-keyring \
-            base-devel man lm_sensors networkmanager openresolv iwd inetutils dosfstools"
+  packages="base linux${LTS} linux${LTS}-headers linux-firmware reflector pacman-contrib archlinux-keyring \
+            systemd-swap grub efibootmgr rsync openssh dos2unix dosfstools lsof file bash-completion p7zip zip unzip \
+            htop sudo cpulimit lm_sensors cronie screen time \
+            networkmanager openresolv iwd inetutils nfs-utils \
+            base-devel vim git man"
   pacstrap /mnt $packages
 
   # copy wi-fi
