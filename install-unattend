@@ -369,7 +369,7 @@ bootstrap() {
   rm /mnt/install-unattend
 
   # unmount partitions
-  umount ${BOOT_PART} ${EFI_PART:-${BOOT_PART}} 2> /dev/null
+  umount ${EFI_PART:-${BOOT_PART}} ${ROOT_PART} 2> /dev/null
 }
 
 main() {
