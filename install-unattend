@@ -5,7 +5,7 @@ LOG_FILE=install.log
 exec > >(tee $LOG_FILE) 2>&1
 
 SCRIPTNAME=install-unattend
-SCRIPTURL=https://raw.githubusercontent.com/vm75/arch-setup/main/install-unattend
+SCRIPTURL=https://raw.githubusercontent.com/vm75/arch-setup/main/install-unattend?random=${RANDOM}
 
 # defaults
 COUNTRIES=US                  # -c
@@ -168,7 +168,7 @@ setup_datetime() {
   systemctl enable systemd-timesyncd.service
   checkError "enabling systemd-timesyncd"
 
-  if [[ ! -z ${POST_PACSTRAP} ]] ; then
+  if [[ ${MODE} == post-pacstrap ]] ; then
     # timedatectl set-timezone ${TIMEZONE}
     # checkError "setting timezone"
     ln -s /usr/share/zoneinfo/${TIMEZONE} /etc/localtime
@@ -274,6 +274,11 @@ setup_apps() {
   # key for aur
   gpg --keyserver keyserver.ubuntu.com --recv-keys 5C4A26CD4CC8C397
 
+  # setup user-apps
+  su - ${USERNAME} -c "-U"
+}
+
+setup_user_apps() {
   # install aur
   install_aur udevil
 }
@@ -358,10 +363,11 @@ bootstrap() {
 
   # setup and run post-pacstrap
   cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist
-  echo "curl -L ${SCRIPTURL} | bash -s -- -P -c '${COUNTRIES}' ${BIOS_BOOTLOADER} -n '${HOSTNAME}' -l '${LOCALE}' -k '${KEYMAP}' -t '${TIMEZONE}' -u '${USERNAME}' -p '${PASSWORD}'" > /mnt/post-pacstrap
-  chmod +x /mnt/post-pacstrap
-  arch-chroot /mnt /post-pacstrap
-  rm /mnt/post-pacstrap
+  mkdir -p /mnt/tmp
+  curl -L ${SCRIPTURL} -o /mnt/tmp/install-unattend
+  chmod +x /mnt/tmp/install-unattend
+  arch-chroot /mnt /tmp/install-unattend -P -c "${COUNTRIES}" ${BIOS_BOOTLOADER} -n "${HOSTNAME}" -l "${LOCALE}" -k "${KEYMAP}" -t "${TIMEZONE}" -u "${USERNAME}" -p "${PASSWORD}"
+  rm /mnt/tmp/install-unattend
 
   # unmount partitions
   umount ${BOOT_PART} ${ROOT_PART} 2> /dev/null
@@ -372,7 +378,8 @@ main() {
     export BIOS_BOOTLOADER="-b"
   fi
 
-  while getopts "DLPbc:d:e:f:hk:l:n:p:s:t:u:w:" option; do
+  MODE=bootstrap
+  while getopts "DLPUbc:d:e:f:hk:l:n:p:s:t:u:w:" option; do
     case "${option}" in
     D)
       set -x
@@ -381,7 +388,10 @@ main() {
       export LTS="-lts"
       ;;
     P)
-      export POST_PACSTRAP=1
+      export MODE=post-pacstrap
+      ;;
+    U)
+      export MODE=user-apps
       ;;
     b)
       export BIOS_BOOTLOADER="-b"
@@ -438,11 +448,12 @@ main() {
   done
   shift $((OPTIND-1))
 
-  if [[ -z ${DRIVE} ]] ; then
+  if [[ ${MODE} != user-apps && -z ${DRIVE} ]] ; then
     error "No valid drive found"
   fi
 
-  if [[ -z ${POST_PACSTRAP} ]] ; then
+  case ${mode} in
+  bootstrap)
     bootstrap
 
     echo
@@ -456,7 +467,8 @@ main() {
     echo "  USERNAME=${USERNAME}"
     echo "  PASSWORD=${PASSWORD}"
     echo "  MIRROR COUNTRIES=${COUNTRIES}"
-  else
+    ;;
+  post-pacstrap)
     setup_datetime
     setup_language
     setup_hostname
@@ -464,7 +476,11 @@ main() {
     setup_network
     setup_apps
     setup_bootloader
-  fi
+    ;;
+  user-apps)
+    setup_user_apps
+    ;;
+  esac
 }
 
 main "$@"
