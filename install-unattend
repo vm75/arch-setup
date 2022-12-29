@@ -378,7 +378,7 @@ main() {
     export BIOS_BOOTLOADER="-b"
   fi
 
-  MODE=bootstrap
+  export MODE=bootstrap
   while getopts "DLPUbc:d:e:f:hk:l:n:p:s:t:u:w:" option; do
     case "${option}" in
     D)
@@ -452,7 +452,7 @@ main() {
     error "No valid drive found"
   fi
 
-  case ${mode} in
+  case ${MODE} in
   bootstrap)
     bootstrap
 
