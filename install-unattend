@@ -2,7 +2,6 @@
 
 # log
 LOG_FILE=install.log
-exec > >(tee $LOG_FILE) 2>&1
 
 SCRIPTNAME=install-unattend
 SCRIPTURL=https://raw.githubusercontent.com/vm75/arch-setup/main/install-unattend?random=${RANDOM}
@@ -453,6 +452,8 @@ main() {
 
   case ${MODE} in
   bootstrap)
+    exec > >(tee $LOG_FILE) 2>&1
+
     bootstrap
 
     echo
