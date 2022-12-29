@@ -334,7 +334,7 @@ bootstrap() {
     cp -ar "${USER_FILES}/." ${USER_HOME}
   elif [[ -f ${USER_FILES} ]] ; then
     cd ${USER_HOME}
-    case ${USER_FILES} in
+    case "${USER_FILES}" in
       *.tar)
         tar xf "${USER_FILES}"
         ;;
@@ -400,13 +400,13 @@ main() {
       export BIOS_BOOTLOADER="-b"
       ;;
     c)
-      export COUNTRIES="${OPTARG}"
+      export COUNTRIES=${OPTARG}
       ;;
     d)
       if [[ -b /dev/${OPTARG} ]] ; then
         export DRIVE="/dev/${OPTARG}"
       elif [[ -b ${OPTARG} ]] ; then
-        export DRIVE="${OPTARG}"
+        export DRIVE=${OPTARG}
       fi
       ;;
     e)
@@ -415,34 +415,34 @@ main() {
       fi
       ;;
     f)
-      export USER_FILES="${OPTARG}"
+      export USER_FILES=$(realpath "${OPTARG}")
       ;;
     h)
       usage
       exit
       ;;
     k)
-      export KEYMAP="${OPTARG}"
+      export KEYMAP=${OPTARG}
       ;;
     l)
-      export LOCALE="${OPTARG}"
+      export LOCALE=${OPTARG}
       ;;
     n)
-      export HOSTNAME="${OPTARG}"
+      export HOSTNAME=${OPTARG}
       ;;
     p)
-      export PASSWORD="${OPTARG}"
+      export PASSWORD=${OPTARG}
       ;;
     s)
-      export SSH_KEY="${OPTARG}"
+      export SSH_KEY=${OPTARG}
       ;;
     t)
       if [[ -f "/usr/share/zoneinfo/${TIMEZONE}" ]] ; then
-        export TIMEZONE="${OPTARG}"
+        export TIMEZONE=${OPTARG}
       fi
       ;;
     u)
-      export USERNAME="${OPTARG}"
+      export USERNAME=${OPTARG}
       ;;
     w)
       init_wifi ${OPTARG}
