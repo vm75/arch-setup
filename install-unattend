@@ -278,11 +278,14 @@ setup_apps() {
 
   # setup user-apps
   su - ${USERNAME} -c "/install-unattend -U"
+
+  # aur services
+  systemctl enable rc-local.service
 }
 
 setup_user_apps() {
   # install aur
-  install_aur udevil
+  install_aur udevil rc-local
 }
 
 setup_bootloader() {
@@ -312,8 +315,8 @@ bootstrap() {
   # install to drive
   packages="base linux${LTS} linux${LTS}-headers linux-firmware reflector pacman-contrib archlinux-keyring \
             systemd-swap grub efibootmgr rsync openssh dos2unix dosfstools lsof file bash-completion p7zip zip unzip \
-            htop sudo cpulimit lm_sensors cronie screen time \
-            networkmanager openresolv iwd inetutils nfs-utils \
+            htop sudo cpulimit lm_sensors cronie screen time alsa-utils \
+            networkmanager openresolv iwd inetutils nfs-utils wget \
             base-devel vim git man"
   pacstrap /mnt $packages
 
