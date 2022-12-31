@@ -198,7 +198,7 @@ setup_hostname() {
 setup_user() {
   # create user
   groupadd -g ${USER_UID} ${USERNAME}
-  useradd -u ${USER_GID} -g ${USERNAME} -G wheel,audio -s /bin/bash ${USERNAME}
+  useradd -u ${USER_GID} -g ${USERNAME} -G wheel,audio -s /usr/bin/bash ${USERNAME}
   echo "${USERNAME}:${PASSWORD}" | chpasswd
 
   # sudo
