@@ -202,6 +202,7 @@ setup_user() {
   echo "${USERNAME}:${PASSWORD}" | chpasswd
 
   # sudo
+  sudo sed -e '0,/#*\s*%wheel/s//%wheel/' -i /etc/sudoers
   mkdir -p /etc/sudoers.d
   echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${USERNAME}
 }
